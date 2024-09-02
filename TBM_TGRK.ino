@@ -149,9 +149,7 @@
 uint8_t btn = 0;  //(0-5)
 
 //MAIN PROGRAM ARRAY
-int8_t prog[MAX] = {
-BB,PAIX,S1,LP
-};
+int8_t prog[MAX];
 //general purpose registers for storing integers 0-127
 uint8_t r[8];  //(0-7)
 //function registers for storing function addresses 0-127
