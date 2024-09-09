@@ -23,11 +23,11 @@
 #define DS_NO_WDT_B_INTERRUPT 2
 
 //BUTTON MACROS
-#define B_RUN 1
-#define B_SAVE 2
+#define B_RUN 5
+#define B_SAVE 4
 #define B_TOGGLE 3
-#define B_RIGHT 4
-#define B_LEFT 5
+#define B_RIGHT 2
+#define B_LEFT 1
 
 //LED MACROS
 #define LED0 0
@@ -47,6 +47,7 @@
 #define DIV -6
 #define AND -7
 #define OR -8
+#define RND -9
 
 //CONDITIONAL MACROS
 #define CG -11
@@ -69,6 +70,9 @@
 #define LR7 -89
 #define LR8 -88
 
+//LOOP FUNCTION MACRO
+#define LPF -87
+
 //REGISTER MACROS
 #define R1 -127
 #define R2 -126
@@ -80,12 +84,8 @@
 #define R8 -120
 
 //EEPROM STORAGE MACROS
-#define E1S -119
-#define E2S -118
-#define E3S -117
-#define E1R -116
-#define E2R -115
-#define E3R -114
+#define ER -119
+#define EW -118
 
 //FUNCTION MACROS
 #define F1 -63
@@ -137,16 +137,17 @@
 #define D8 -72
 
 //BUTTON INPUT MACROS
-#define BS -44
-#define BT -43
-#define BR -42
-#define BL -41
+#define BG -44
+#define BV -43
 
 //BLINK BYTE MACRO
 #define BB -33
 
 //variable for storing button press
 uint8_t btn = 0;  //(0-5)
+
+//variable for storing interpreter button press
+int8_t br = 0;
 
 //MAIN PROGRAM ARRAY
 int8_t prog[MAX];
@@ -159,8 +160,8 @@ uint8_t ret_addr[8];  //(0-7)
 
 
 //Timing Variables
-const unsigned long buttonInterval = 100;   //button check interval
-const unsigned long vccAdcInterval = 2000;  //VCC check interval
+const uint8_t buttonInterval = 100;   //button check interval
+const uint16_t vccAdcInterval = 2000;  //VCC check interval
 
 unsigned long delayInterval = 0;
 unsigned long nowTime = millis();
@@ -188,12 +189,24 @@ uint8_t mpos = 0;
 //flag variable (bitarray)
 int8_t flg = 0;
 
+//pseudo random number variable
+int8_t random_number = 0;
+
 //declare vcc_check_interval()
 void vcc_check_interval();  //periodically check vcc voltage
+//declare check_button()
+void check_button();
 
 //GET SELECTED BIT FROM BYTE
 int8_t get_bit(int8_t num, int8_t bit_s) {
   return (num >> (7 - bit_s)) & 1;
+}
+
+//FUNCTION TO GENERATE PSEUDO RANDOM NUMBERS 0-127
+void set_random(int8_t time_seed){
+  random_number <<= 1;
+  random_number ^= get_bit(time_seed,7);
+  random_number &= 127;
 }
 
 //TOGGLE SELECTED BIT IN BYTE
@@ -266,11 +279,15 @@ void long_sleep(uint8_t sleep_mode) {
   sleep_disable();
 }
 
+void reset_led_pins() {
+  pinMode(LED0, OUTPUT);
+  pinMode(LED1, OUTPUT);
+}
+
 //FUNCTION TO RESET LED PINS AND ENABLE ADC AFTER DEEPSLEEP
 void long_sleep_wake() {
   //set LED pins to output
-  pinMode(LED0, OUTPUT);
-  pinMode(LED1, OUTPUT);
+  reset_led_pins();
   //enable ADC
   ADCSRA |= 1 << ADEN;
 }
@@ -352,10 +369,11 @@ float read_voltage(uint8_t mode) {
   float raw = 0.0;
   uint8_t pin;
 
-  if(mode == 2){
+  if (mode == 2) {
+    pinMode(UPIN, INPUT);
     analogReference(DEFAULT);
     pin = A1;
-  }else{
+  } else {
     analogReference(INTERNAL1V1);
     pin = A2;
   }
@@ -373,7 +391,7 @@ float read_voltage(uint8_t mode) {
 
   do_delay(10);
 
-  if(pin == A2){
+  if (pin == A2) {
     analogReference(DEFAULT);  //reset analogReference
   }
 
@@ -404,7 +422,7 @@ int8_t process_voltage(uint8_t mode) {
 
 //Put device in deepsleep if VCC is < 2v
 void check_voltage() {
-  while (read_voltage(0) < 2.0) {         //if its low, pwr_down until its above 2v
+  while (read_voltage(0) < 2.0) {        //if its low, pwr_down until its above 2v
     for (uint8_t i = 0; i < 120; i++) {  //sleep 2 min
       long_sleep(DS_WDT);
     }
@@ -427,8 +445,7 @@ uint8_t button() {
 
 //INITIALIZE LED PINS
 void setup() {
-  pinMode(LED0, OUTPUT);
-  pinMode(LED1, OUTPUT);
+  reset_led_pins();
 }
 
 //FUNCTION TO DISPLAY BYTE TYPE
@@ -469,19 +486,19 @@ void goto_menu() {
 
 //BYTE MODE, VIEW PROGRAM BYTES
 void byte_mode(uint8_t b) {
-  if (b == 5 && pos > 0) {
+  if (b == B_LEFT && pos > 0) {
     pos -= 1;
     byte_mode_led(pos);
-  } else if (b == 4 && pos < MAX) {
+  } else if (b == B_RIGHT && pos < MAX) {
     pos += 1;
     byte_mode_led(pos);
-  } else if (b == 3) {
+  } else if (b == B_TOGGLE) {
     mode = BIT_MODE;
     bpos = 0;
     toggle_led(get_bit(prog[pos], bpos));
-  } else if (b == 2) {
+  } else if (b == B_SAVE) {
     goto_menu();  //exit to main menu
-  } else if (b == 1) {
+  } else if (b == B_RUN) {
     blink_byte(prog[pos]);
     toggle_led(get_bit(prog[pos], 0));
   }
@@ -489,21 +506,21 @@ void byte_mode(uint8_t b) {
 
 //BIT MODE, EDIT BITS IN BYTE
 void bit_mode(uint8_t b) {
-  if (b == 5 && bpos > 0) {
+  if (b == B_LEFT && bpos > 0) {
     bpos -= 1;
     toggle_led(get_bit(prog[pos], bpos));
-  } else if (b == 4 && bpos < 7) {
+  } else if (b == B_RIGHT && bpos < 7) {
     bpos += 1;
     toggle_led(get_bit(prog[pos], bpos));
-  } else if (b == 3) {
+  } else if (b == B_TOGGLE) {
     toggle_bit(bpos);
     toggle_led(get_bit(prog[pos], bpos));
-  } else if (b == 2) {
+  } else if (b == B_SAVE) {
     led_ctrl(LOW, LOW);
     bpos = 0;
     mode = BYTE_MODE;
     byte_mode_led(pos);
-  } else if (b == 1) {
+  } else if (b == B_RUN) {
     blink_byte(prog[pos]);
     do_delay(400);
     toggle_led(get_bit(prog[pos], bpos));
@@ -520,7 +537,7 @@ uint8_t is_pin(int8_t addr) {
 //CHECK IF IS AN EEPROM KEYWORD
 uint8_t is_eeprom(int8_t addr) {
   uint8_t flag = 0;
-  if (prog[addr] >= E1S && prog[addr] <= E3R) { flag = 1; }
+  if (prog[addr] == EW || prog[addr] == ER) { flag = 1; }
   return flag;
 }
 
@@ -551,32 +568,30 @@ int8_t get_reg_val(int8_t addr) {
 }
 
 int8_t get_pin_val(int8_t addr) {
-  if(prog[addr]==PAXX){
+  if (prog[addr] == PAXX) {
     return process_voltage(0);
-  }
-  else if (prog[addr] == PDIU) {
+  } else if (prog[addr] == PDIU) {
     pinMode(UPIN, INPUT_PULLUP);
     do_delay(100);
     return (int8_t)digitalRead(UPIN);
-  }
-  else if (prog[addr] == PDID) {
+  } else if (prog[addr] == PDID) {
     pinMode(UPIN, INPUT);
     digitalWrite(UPIN, LOW);
     return (int8_t)digitalRead(UPIN);
-  }
-  else if (prog[addr] == PAIX) {
+  } else if (prog[addr] == PAIX) {
     //ANALOG IN ON PB2
     return process_voltage(2);
+  } else {
+    return -1;
   }
-  else { return -1; }
-
 }
 
 int8_t get_eeprom_val(int8_t addr) {
   int8_t val = 0;
-  if (prog[addr] >= E1R && prog[addr] <= E3R) {
-    uint16_t eeAddress = 511 - (prog[addr] - E1R);
-    val = EEPROM.read(eeAddress);
+  if (prog[addr] == ER) {
+    uint16_t eeAddress = 385 + (prog[addr + 1]);  //set the address
+    if(eeAddress < 385 || eeAddress > 502){ blink_error(addr); } //if we our outside of our address range
+    val = EEPROM.read(eeAddress);         //read eeprom byte
   }
   return val;
 }
@@ -590,8 +605,13 @@ int8_t get_token_value(int8_t addr) {
     num = prog[addr];
   } else if (is_pin(addr)) {
     num = get_pin_val(addr);
-  } else if (is_eeprom(addr)) {
+  } else if (prog[addr] == ER) {
     num = get_eeprom_val(addr);
+  } else if (prog[addr] == RND) { //check if random number
+    set_random(millis());
+    num = random_number;
+  } else if (prog[addr] == BV){
+    num = br;
   }
   return num;  //return the number
 }
@@ -611,6 +631,9 @@ int8_t check_con(int8_t c, int8_t num1, int8_t num2) {
 int8_t do_condition(int8_t x) {
   //if conditional is true evaluate expression
   // check_con(C,n1,n2)
+  if ( is_eeprom(prog[x + 1]) || is_eeprom(prog[x + 2])){
+    blink_error(x); //We cant check conditions on EEPROM addresses (maybe someday :)
+  }
   if (check_con(prog[x], get_token_value(x + 1), get_token_value(x + 2))) {
     x += 3;  //skip compared numbers
     //check if there is another condition
@@ -657,12 +680,15 @@ int8_t do_math(int8_t regv, int8_t opaddr, int8_t numaddr) {
 
 //PROCESS SAVING EEPROM BYTES
 int8_t do_eeprom_save(int8_t x) {
+  x++; //skip the ES keyword
+  uint16_t eeAddress = 385 + (prog[x]);  //set the address
 
-  uint16_t eeAddress = 511 - (prog[x] - E1S);  //set the address
+  if(eeAddress < 385 || eeAddress > 502){ blink_error(x); } //if we our outside of our address range
+
   int8_t val = EEPROM.read(eeAddress);         //read eeprom byte
-  x++;
+  x++; //skip the address
 
-  if (is_math(x)) {  // E1S+21/2
+  if (is_math(x)) {  // EW + 21 / 3
     //do the math. Check if there are more operations
 
     if (val < 0) { val = 0; }  //if for some reason it's negative set to zero
@@ -676,7 +702,7 @@ int8_t do_eeprom_save(int8_t x) {
     //otherwise we are assigning value to this eeprom address register
     val = get_token_value(x);  //store byte
     x++;
-    if (is_math(x)) {       // E1S 21*12/4
+    if (is_math(x)) {       // EW 21*12/4
       while (is_math(x)) {  //check for multiple math operations
         val = do_math(val, x, get_token_value(x + 1));
         x += 2;  //skip the operator and number
@@ -697,16 +723,26 @@ int8_t do_register(int8_t x) {
   if (is_math(x)) {       //if we are doing math
     while (is_math(x)) {  //check for multiple math operations
       r[reg] = do_math(r[reg], x, get_token_value(x + 1));
-      x += 2;  //skip the operator and number
+      if ( is_eeprom(prog[ x + 1])){
+        x += 3; // if eeprom: skip operator, EW, and address
+      }
+      else{
+        x += 2;  //skip the operator and number
+      }
     }
   } else {
     //otherwise we are assigning value to this register
     r[reg] = get_token_value(x);
     x++;                    //skip the register or number
-    if (is_math(x)) {       // E1S 21*12/4
+    if (is_math(x)) {       // check if math
       while (is_math(x)) {  //check for multiple math operations
         r[reg] = do_math(r[reg], x, get_token_value(x + 1));
-        x += 2;  //skip the operator and number
+        if ( is_eeprom(prog[ x + 1])){
+          x += 3; // if eeprom: skip operator, EW, and address
+        }
+        else{
+          x += 2;  //skip the operator and number
+        }
       }
     }
   }
@@ -766,6 +802,9 @@ int8_t do_sleep(int8_t x) {
 int8_t do_loop(int8_t x) {
   if (prog[x] == LP) {  //LOOP function or expression block
     while (prog[x] != FUNC && prog[x] != SEP && x > SEP) { x--; }
+  } 
+  else if (prog[x] == LPF) { // LOOP FUNCTION ONLY
+    while (prog[x] != FUNC && x > SEP) { x--; }
   } else {  //loop x amount of rx times
     //if loop is starting, set temp register to selected register value
     if (temp < 0) { temp = prog[x] - LR1; }
@@ -808,8 +847,7 @@ int8_t do_gpio(int8_t x) {
     pinMode(UPIN, OUTPUT);
     digitalWrite(UPIN, HIGH);
     value = HIGH;
-  }
-  else if (prog[x] == PDOL) {
+  } else if (prog[x] == PDOL) {
     pinMode(UPIN, OUTPUT);
     digitalWrite(UPIN, LOW);
     value = LOW;
@@ -834,13 +872,10 @@ int8_t do_led(int8_t x) {
 
 //PROCESS BUTTONS (INTERPRETER)
 int8_t do_buttons(int8_t x) {
-  if (prog[x] == BL && button() == B_LEFT) {
-    x++;
-  } else if (prog[x] == BR && btn == B_RIGHT) {
-    x++;
-  } else if (prog[x] == BT && btn == B_TOGGLE) {
-    x++;
-  } else if (prog[x] == BS && btn == B_SAVE) {
+  br = 0;
+  if (btn > 0 && btn < B_RUN){
+    br = (int8_t)btn;
+    btn = 0;
     x++;
   }
   return x;
@@ -859,30 +894,30 @@ int8_t parse_op(int8_t x) {
     x = do_function(x);
   } else if (prog[x] >= S1 && prog[x] <= S8) {  //its a SLEEP code
     x = do_sleep(x);
-  } else if (prog[x] >= LP && prog[x] <= LR8) {  //its a loop keyword
+  } else if (prog[x] >= LP && prog[x] <= LPF) {  //its a loop keyword
     x = do_loop(x);
   } else if (prog[x] >= D0 && prog[x] <= D8) {  //deepsleep
     x = do_deepsleep(x);
   } else if (prog[x] == PDOH || prog[x] == PDOL) {  //pin control
-    if(do_gpio(x) < 0){
+    if (do_gpio(x) < 0) {
       blink_error(x);
     }
     x++;
   } else if (prog[x] >= L0L && prog[x] <= L1H) {  //LED control
     x = do_led(x);
-  } else if (prog[x] >= BS && prog[x] <= BL) {  //read buttons
+  } else if (prog[x] == BG) {  //read buttons
+    check_button();
     if (get_bit(flg, BTN_FLAG) && btn > 0) {
       x = do_buttons(x);
     }
-  } else if (is_eeprom(x)) {  //EEPROM ACCESS
-    if (prog[x] <= E3S) {     //if our keyword is a save keyword
-      x = do_eeprom_save(x);
-    } else {
-      blink_error(x);
-    }
+  } else if (prog[x] == EW) {  //EEPROM ACCESS
+    x = do_eeprom_save(x);
   } else if (prog[x] == BB) {
     x++;
     blink_byte(get_token_value(x));
+    if( prog[x] == ER ){
+      x++; //skip eeprom address
+    }
     x++;
   }
   return x;
@@ -891,7 +926,13 @@ int8_t parse_op(int8_t x) {
 //PROGRAM INTERPRETER FUNCTION
 void interpret() {
   int8_t x = 0;  //reset program read position
-  ret_pos = 0;
+  ret_pos = 0;   //reset function return position
+  //reset interpreter variables
+  for (uint8_t i = 0; i < 8; i++){
+    r[i] = 0;
+    f[i] = 0;
+    ret_addr[i] = 0;
+  }
   led_ctrl(LOW, LOW);  //reset LED's
   do_delay(400);       //delay to prevent button interference
 
@@ -966,7 +1007,91 @@ uint8_t menu_nav(uint8_t b) {
   return flag;
 }
 
+//TRANSMIT PROGRAM OVER SERIAL
+void send_serial() {
 
+  uint8_t bp = 0;
+
+  Serial.flush();
+  do_delay(400);
+
+  while (bp < MAX && prog[bp] != EOP) {
+    if (prog[bp] == 0 && prog[bp + 1] == 0) {
+      break;
+    } else {
+      Serial.write(prog[bp]);
+      bp++;
+    }
+  }
+  Serial.flush();
+  Serial.write(EOP);
+}
+
+// LOAD PROGRAM FROM SERIAL
+void read_serial() {
+  uint8_t done = 0;
+  uint8_t count = 0;
+  int8_t new_byte = 0;
+
+  while (!done) {
+
+    if (Serial.available() > 0) {
+
+      new_byte = Serial.read();
+      prog[count] = new_byte;
+
+      if (count == MAX || new_byte == EOP) {
+        done = 1;
+        break;
+      }
+      else {
+        count++;
+      }
+    }
+  }
+  delay(400);
+  send_serial();
+}
+
+uint8_t serial_waiting() {
+  uint8_t waiting = 1;
+  uint8_t mode = 0;
+  uint8_t count = 0;
+
+  while (waiting) {
+
+    check_button();
+    if (get_bit(flg, BTN_FLAG) && btn > 0) {  //if we have a press
+      if (btn == B_SAVE) { waiting = 0; }
+      btn = 0;
+    }
+
+    if (!Serial.available() && count < 10) {
+      Serial.flush();
+      Serial.write(255);
+      count ++;
+    }
+
+    if (Serial.available() > 0) {
+
+      uint8_t in_byte = Serial.read();
+
+      if(in_byte == 1){
+        mode = 1;
+        while (Serial.available() > 0);
+        waiting = 0;
+      }
+      else if(in_byte == 2){
+        mode = 2;
+        while (Serial.available() > 0);
+        waiting = 0;
+      }
+    }
+  }
+  return mode;
+}
+
+//LAUNCHER FOR PROGRAMS AND MODES
 void run_prog(int8_t selection) {
   if (selection == 0) {
     if (mode == MENU_MODE) {
@@ -989,14 +1114,28 @@ void run_prog(int8_t selection) {
     if (mode == MENU_MODE) {
       mode = LOAD_MODE;
     } else if (mode == RUN_MODE) {
-      //
+      blink_both(1);
+      led_ctrl(LOW, LOW);
+      do_delay(400);
+
+      Serial.begin(2400);
+      uint8_t status = serial_waiting();
+      if(status == 1){
+        send_serial();
+      }
+      else if(status == 2){
+        read_serial();
+      }
+      Serial.end();
+
+      reset_led_pins();
+      blink_both(2);
     }
   } else if (selection == 3) {
     if (mode == MENU_MODE) {
       mode = SAVE_MODE;
     } else if (mode == RUN_MODE) {
-      led_ctrl(LOW, LOW);
-      interpret();
+      //GAME?
     }
   } else {
     blink_error(2);
@@ -1086,12 +1225,13 @@ void check_button() {
   uint8_t b = 0;       //button variable
   //if debounce time has passed check button
   if (nowTime - curButtonTime >= buttonInterval) {
-
+    
     b = button();  //check for button press
 
     if (b > 0 && !get_bit(flg, BTN_FLAG)) {  //if a button is pressed
       toggle_flag_bit(BTN_FLAG);
       btn = b;
+      set_random(nowTime); //reset our random number
     } else if (b == 0 && get_bit(flg, BTN_FLAG)) {  //if flag is set and
       toggle_flag_bit(BTN_FLAG);                    //if no button is pressed clear flag
       btn = 0;
