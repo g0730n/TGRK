@@ -168,6 +168,7 @@ unsigned long nowTime = millis();
 unsigned long delayTime = 0;
 unsigned long curButtonTime = 0;
 unsigned long curVccAdcTime = 0;
+unsigned long bgTime = 0;
 
 //function return position ret_addr[ret_pos] (ret_pos = 0-7)
 uint8_t ret_pos = 0;
@@ -232,6 +233,9 @@ ISR(PCINT0_vect) {
     toggle_flag_bit(INT_FLAG);
     //clear the interrupt from pin 3
     PCMSK &= ~_BV(PCINT3);
+    if(!get_bit(flg, BTN_FLAG)){ //if button pressed flag isn't set,
+      toggle_flag_bit(BTN_FLAG); //set button pressed flag so we don't kill running interpreter
+    }
   }
 }
 
@@ -648,7 +652,7 @@ int8_t do_condition(int8_t x) {
       //skip the OR, parser will check next condition
       x++;
     } else {  //otherwise skip the expression
-      while (prog[x] != SEP && prog[x] != FUNC && prog[x] < MAX) { x++; }
+      while (prog[x] != SEP && prog[x] != FUNC && x < MAX) { x++; }
     }
   }
   return x;
@@ -807,8 +811,8 @@ int8_t do_loop(int8_t x) {
     while (prog[x] != FUNC && x > SEP) { x--; }
   } else {  //loop x amount of rx times
     //if loop is starting, set temp register to selected register value
-    if (temp < 0) { temp = prog[x] - LR1; }
-    temp -= 1;  //decrement temp value
+    if (temp < 0) { temp = r[prog[x] - LR1]; }
+    temp--;  //decrement temp value
     //if we are still counting
     if (temp > 0) {
       while (prog[x] != SEP && prog[x] != FUNC && x > SEP) { x--; }
@@ -872,12 +876,22 @@ int8_t do_led(int8_t x) {
 
 //PROCESS BUTTONS (INTERPRETER)
 int8_t do_buttons(int8_t x) {
+  unsigned long timeout = 5000;
+  unsigned long curTime = millis();
+  bgTime = millis();
   br = 0;
-  if (btn > 0 && btn < B_RUN){
-    br = (int8_t)btn;
-    btn = 0;
-    x++;
+  
+  while (curTime - bgTime <= timeout){
+    curTime = millis();
+    check_button();
+    if (btn > 0 && btn < B_RUN){
+      br = (int8_t)btn;
+      break;
+    }
   }
+
+  btn = 0;
+  x++;
   return x;
 }
 
@@ -906,10 +920,7 @@ int8_t parse_op(int8_t x) {
   } else if (prog[x] >= L0L && prog[x] <= L1H) {  //LED control
     x = do_led(x);
   } else if (prog[x] == BG) {  //read buttons
-    check_button();
-    if (get_bit(flg, BTN_FLAG) && btn > 0) {
-      x = do_buttons(x);
-    }
+    x = do_buttons(x);
   } else if (prog[x] == EW) {  //EEPROM ACCESS
     x = do_eeprom_save(x);
   } else if (prog[x] == BB) {
