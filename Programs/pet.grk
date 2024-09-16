@@ -1,0 +1,83 @@
+* A simple "Virtual Pet" game *
+* Charging via solar panel "feeds" pet,
+  Pressing < button gives pet water,
+  Pressing > button "pets" the pet.
+  Overall pet health viewed by pressing T button.
+  S button to exit game while pet is awake.
+  R button to wake pet up from sleep.
+  
+  Pet will "Sleep" for 8 minutes at a time,
+  each time a pet wakes up, it's thirst and
+  "attention" stats decrease. These can be increased
+  by pressing > and < buttons. Pet's "hunger" increases
+  as super capacitor voltage decreases, the only way to
+  "feed" the pet is by placing pet in sunlight or directly
+  under a very bright lamp.
+*
+
+F1
+  FUNC
+    BG
+    
+    CE BV 0
+      R6 ADD 1
+      R5 ADD 1
+      CGE R5 7
+        R3 SUB 8
+        R4 SUB 4
+        R5 0
+    SEP
+    
+    CE BV 1
+      R6 0
+      R3 ADD 10
+      R4 ADD 1
+    SEP
+    
+    CE BV 2
+      R6 0
+      R4 ADD 10
+    SEP
+    
+    R2 PAXX SUB 27 MUL 5
+    R7 R3 DIV 3
+    R8 R4 DIV 3
+    R1 R2 DIV 3 ADD R7 ADD R8
+    
+    CE BV 3
+      R6 0
+      BB R1
+
+  FUNC
+  
+F2
+  FUNC
+    CGE R1 85
+      L1H
+      L0L
+    SEP
+    
+    CL R1 85
+      L1L
+      L0H
+  FUNC
+  
+  
+F3
+  FUNC
+    F2
+    F1
+    CGE R6 5
+      D8
+      R6 0
+      R5 ADD 1
+      S1
+    SEP
+    
+    CG R1 0 AND CNE BV 4
+      LPF
+  FUNC
+
+F3
+
+EOP

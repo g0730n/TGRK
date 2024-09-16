@@ -1,0 +1,127 @@
+* A very simple RPG Game *
+* Player starts at map 0, which is the INN.
+  When player goes to the INN spend gold acquired from defeating monsters
+  to restore health.
+  Advancing MAP level by pressing button >,
+  going back to the INN by pressing button <,
+  Button S to blink map level.
+  Button T to blink HP.
+*
+  
+* Set player HP to 127, *
+R2 127
+
+F1
+  FUNC
+    * Increment MAP, *
+    R1 ADD 1
+    * if MAP <= EXPLORED: *
+    CLE R1 R7
+    * Set MAP to EXPLORED, *
+      R1 R7
+    * blink walk animation. *
+      BB -1
+  FUNC
+
+F2
+  FUNC
+  
+    * If no FIGHT is active: *
+    CE R8 0
+      * Get BUTTON press, *
+      BG
+
+      * If right BUTTON: *
+      CE BV 2
+        F1
+        * If MAP is UNEXPLORED, *
+        CG R1 R7
+          * and RANDOM > 64: *
+          CG RND 64
+            * MONSTER HP = MAP / 2 + 20, *
+            R5 R1 DIV 2
+            * blink MONSTER HP, *
+            BB R5
+            * activate FIGHT, monsters turn. *
+            R8 85
+    SEP
+    
+    * If left BUTTON: *
+    CE BV 1
+      * HP = HP + GOLD, *
+      R2 ADD R3
+      * spend all GOLD. *
+      R3 0
+
+      * If MAP is not the INN: *
+      CG R1 0
+        * set MAP to INN, *
+        R1 0
+        * blink walk animation then loop. *
+        BB 0
+        LP
+    SEP
+    
+    * If toggle BUTTON: *
+    CE BV 3
+      * blink HP. *
+      BB R2
+    SEP
+    
+    * If save BUTTON: *
+    CE BV 4
+      * blink MAP. *
+      BB R1
+    SEP
+    
+    * If FIGHT turn is monsters: *
+    CE R8 1
+      * Monster HIT = (MAP + MONSTER HEALTH + RANDOM)  / 18 + 1, *
+      R6 R1 ADD R5 ADD RND DIV 20
+      * subtract monster HIT from HP, *
+      R2 SUB R6
+      * pass FIGHT turn to player. *
+      R8 2
+    SEP
+    
+    * If FIGHT turn is players: *
+    CE R8 2
+      * Player HIT = (HP + GOLD + RANDOM) / 12 + 1, * 
+      R6 R2 ADD R3 ADD RND DIV 12
+      * subtract player HIT from MONSTER HP, *
+      R5 SUB R6
+      * pass attack to monster, *
+      R8 1
+      
+      * If MONSTER HP is less or equal to zero: *
+      CLE R5 0
+        * Set EXPLORED to current MAP, *
+        R7 R1
+        * GOLD acquired = RANDOM, * 
+        R3 ADD RND
+        * deactivate FIGHT. *
+        R8 0
+    SEP
+    
+    * If player HP is greater than zero, *
+    CG R2 0
+      * and If player is not at MAP 127: *
+      CLE R1 126
+        * loop the game function. *
+        LPF
+      
+  FUNC
+
+* and start game loop. *
+F2
+
+* If player is dead, or at MAP 127 Blink map number, *
+SEP
+BB R1
+* sleep 4 seconds, *
+S4
+* and loop forever. *
+LP
+
+* Program end keyword. *
+EOP
