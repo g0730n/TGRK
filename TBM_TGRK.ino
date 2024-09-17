@@ -228,56 +228,61 @@ ISR(WDT_vect) {
 //PCINT3 INTERRUPT
 ISR(PCINT0_vect) {
   //if PB3 is LOW
-  if (digitalRead(3) == LOW) {
-    //set the interrupt flag
-    toggle_flag_bit(INT_FLAG);
-    //clear the interrupt from pin 3
-    PCMSK &= ~_BV(PCINT3);
-    if(!get_bit(flg, BTN_FLAG)){ //if button pressed flag isn't set,
-      toggle_flag_bit(BTN_FLAG); //set button pressed flag so we don't kill running interpreter
-    }
+  noInterrupts();
+  if (digitalRead(PB3) == LOW) {
+      toggle_flag_bit(INT_FLAG);
   }
+  interrupts();
 }
 
 //FUNCTION TO SET ALL PINS INPUT/LOW FOR POWER SAVING
-void pins_down(uint8_t sleep_mode) {
+void pins_down(uint8_t sleep_m) {
   //set all gpio as INPUT
   for (uint8_t i = 0; i <= 5; i++) {
     pinMode(i, INPUT);
     //if we aren't enabling RUN button interrupt
     //set all pins LOW, otherwise don't pulldown PB3
-    if (sleep_mode != DS_WDT_B_INTERRUPT && sleep_mode != DS_NO_WDT_B_INTERRUPT && i != 3) {
+    if (sleep_m != DS_WDT_B_INTERRUPT && sleep_m != DS_NO_WDT_B_INTERRUPT && i != 3) {
       digitalWrite(i, LOW);
     }
   }
 }
 
+void set_wdt(){
+  //set WDT for 1 second
+  WDTCR = bit(WDCE) | bit(WDE);
+  WDTCR = bit(WDIE) | bit(WDP2) | bit(WDP1);
+  wdt_reset();
+}
+
+void enable_button_interrupt(){
+  //Attatch interrupt to PB3
+  GIMSK |= _BV(PCIE);     // Enable Pin Change Interrupts
+  PCMSK |= _BV(PCINT3);   // Use PB3 as interrupt pin
+}
+
 //DEEP SLEEP POWER SAVE FUNCTION
-void long_sleep(uint8_t sleep_mode) {
+void long_sleep(uint8_t sleep_m) {
   //set pins for sleep
-  pins_down(sleep_mode);
+  pins_down(sleep_m);
   //disable ADC
-  ADCSRA = 0;
+  ADCSRA &= ~_BV(ADEN);
   //clear reset bit
   MCUSR = 0;
-  //if we are sleeping indefinitively
-  //dont enable watchdog timer
-  if (sleep_mode != DS_NO_WDT_B_INTERRUPT) {
-    //set WDT for 1 second
-    WDTCR = bit(WDCE) | bit(WDE);
-    WDTCR = bit(WDIE) | bit(WDP2) | bit(WDP1);
-    wdt_reset();
-  }
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  //disable interrupts while setting interrupts
   noInterrupts();
-  sleep_enable();
-
-  //if we want to enable RUN button wakeup
-  if (sleep_mode == DS_WDT_B_INTERRUPT || sleep_mode == DS_NO_WDT_B_INTERRUPT) {
-    //Attatch interrupt to PB3
-    PCMSK = (1 << PCINT3);  // set pin change mask to PCINT3
-    GIMSK = (1 << PCIE);    // enable pin change interrupt
+  //if using WDT
+  if (sleep_m < DS_NO_WDT_B_INTERRUPT) {
+    set_wdt();
   }
+  //if we want to enable RUN button wakeup
+  if (sleep_m > DS_WDT) {
+    enable_button_interrupt();
+  }
+  //set sleep mode and enable
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  sleep_enable();
+  //enable interrupts
   interrupts();
   sleep_cpu();
   sleep_disable();
@@ -293,7 +298,13 @@ void long_sleep_wake() {
   //set LED pins to output
   reset_led_pins();
   //enable ADC
-  ADCSRA |= 1 << ADEN;
+  noInterrupts();
+  ADCSRA |= _BV(ADEN);
+    //disable wdt
+  wdt_disable();
+  //clear the interrupt from pin 3
+  PCMSK &= ~_BV(PCINT3);
+  interrupts();
 }
 
 //LED CONTROL
@@ -829,17 +840,19 @@ int8_t do_deepsleep(int8_t x) {
   int16_t sleep_time = (prog[x] - D0) * 60;  //sleep keyword 1-8s*60 = 1-8min
   if (sleep_time == 0) {                     //if keyword is D0 (-80)
     long_sleep(DS_NO_WDT_B_INTERRUPT);       //sleep forever
-    long_sleep_wake();                       //reset pins and ADC
   } else {
     for (int16_t i = 0; i < sleep_time; i++) {
       long_sleep(DS_WDT_B_INTERRUPT);  //go into PWR_DOWN_MODE
-      long_sleep_wake();               //reset pins and ADC
       if (get_bit(flg, INT_FLAG)) {
         toggle_flag_bit(INT_FLAG);
-        i = sleep_time;
+        i=sleep_time+1;
       }
     }
   }
+  if(!get_bit(flg, BTN_FLAG)){ //if button pressed flag isn't set,
+    toggle_flag_bit(BTN_FLAG); //set button pressed flag so we don't kill running interpreter
+  }
+  long_sleep_wake();               //reset pins and ADC
   x++;
   return x;
 }

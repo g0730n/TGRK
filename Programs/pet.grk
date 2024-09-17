@@ -47,7 +47,7 @@ F1
     CE BV 3
       R6 0
       BB R1
-
+      S2
   FUNC
   
 F2
@@ -71,7 +71,6 @@ F3
       D8
       R6 0
       R5 ADD 1
-      S1
     SEP
     
     CG R1 0 AND CNE BV 4
