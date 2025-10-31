@@ -1,0 +1,52 @@
+* init program *
+L1H S1 L1L S1 L0H S1 L0L
+BB ER 1
+BB ER 2
+
+R4 0
+
+* Function to check if Cap is getting below 2.5v,
+if it is, save two motion count bytes to eeprom.
+then exit the program *
+F1
+  FUNC
+    CLE PAXX 28
+      R4 1
+      EW 1 R2
+      EW 2 R1
+      L0H S1 L0L
+  FUNC
+
+*Main funciton. 
+Then we check to see if the shutdown flag R4 has been set, if not we keep looping
+until motion is seen*
+F2
+  FUNC
+    F1
+    S7
+    CLE PAIX 26 *First we check if PAIX (PB2/A1) voltage is below 2.6. It only outputs a maximum of 3.3v, *
+      CE R4 0    * so we are using ADC here to see if it's been triggered.*
+        LPF
+    SEP
+    
+    R1 ADD 1 *Increment the motion count,*
+
+    CG R1 126 *if first count register will max out, overflow into R2*
+      R1 0
+      R2 ADD 1
+    SEP
+    
+    CG R2 0 *Don't blink R2 unless it has a value*
+      BB R2
+    SEP
+    
+    BB R1 *Blink out binary value of R1*
+    D5    *Deepsleep 5 min. If we are in this part of program motion was detected*
+    CE R4 0 LPF *If shutdown flag hasn't been set, run program again.*
+  FUNC
+  
+F2
+
+D0
+
+EOP
